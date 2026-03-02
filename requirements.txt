@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# requirements.txt — Photogrammetry Post-Processing Pipeline
+# Python 3.11 | macOS authoring + Windows/CUDA runtime
+#
+# READ BEFORE RUNNING pip install:
+#
+#   1. PyTorch must be installed BEFORE this file (different index URLs per platform):
+#
+#      Windows + CUDA 12.1 (runtime machine):
+#        pip install torch==2.4.1+cu121 torchvision==0.19.1+cu121 \
+#          --index-url https://download.pytorch.org/whl/cu121
+#
+#      macOS Apple Silicon (authoring machine, CPU only):
+#        pip install torch==2.4.1 torchvision==0.19.1
+#
+#   2. On Windows (runtime), replace onnxruntime with the GPU variant for
+#      faster Stage 1 background removal:
+#        pip uninstall onnxruntime
+#        pip install onnxruntime-gpu==1.19.2
+#
+#   3. Metashape is NOT on PyPI — install its .whl manually:
+#        pip install /path/to/Metashape-2.x.x-cp311-cp311-win_amd64.whl
+#      See README.md for the full procedure.
+# ──────────────────────────────────────────────────────────────────────────────
+
+
+# ── Core ──────────────────────────────────────────────────────────────────────
+PyYAML==6.0.2
+numpy==1.26.4
+
+# ── Stage 1: Background Removal ───────────────────────────────────────────────
+rembg==2.0.57
+# CPU onnxruntime (macOS authoring default).
+# Replace with onnxruntime-gpu==1.19.2 on Windows/CUDA — see header note above.
+onnxruntime==1.19.2
+
+# ── Stages 1–2: Image Processing ──────────────────────────────────────────────
+Pillow==10.4.0
+opencv-python==4.10.0.84
+
+# ── Stage 4: Stable Diffusion ─────────────────────────────────────────────────
+# torch / torchvision are installed separately — see header note above.
+diffusers==0.30.3
+transformers==4.44.2
+accelerate==0.33.0
+safetensors==0.4.4
+huggingface-hub==0.24.7
+
+# ── Stage 3: Metashape ────────────────────────────────────────────────────────
+# Installed separately as a .whl — not available on PyPI.
+# pip install /path/to/Metashape-2.x.x-cp311-cp311-win_amd64.whl

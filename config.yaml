@@ -1,0 +1,97 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# Photogrammetry Pipeline — config.yaml
+# All tunable parameters in one place.
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Output directory structure
+# Paths are relative to the working directory, or to --output if supplied.
+paths:
+  output_root: output
+  stage1_dir:  01_rembg
+  stage2_dir:  02_normalized
+  stage3_dir:  03_model
+  stage4_dir:  04_enhanced
+
+
+# ── Stage 1: Background Removal ───────────────────────────────────────────────
+rembg:
+  # Model weights to use for background removal.
+  # Options: u2net | u2net_human_seg | u2netp | isnet-general-use | silueta
+  model: u2net
+
+
+# ── Stage 2: Exposure Normalization ───────────────────────────────────────────
+normalization:
+  # Target CIE L* brightness (0–255 on OpenCV's 8-bit LAB scale).
+  # Set to null to auto-compute from the dataset mean (recommended).
+  target_brightness: null
+
+  # CLAHE contrast limit. Higher = stronger local contrast enhancement.
+  clahe_clip_limit: 2.0
+
+  # CLAHE tile grid size [cols, rows]. Smaller tiles = finer local adaptation.
+  clahe_tile_size: [8, 8]
+
+
+# ── Stage 3: Metashape Reconstruction ─────────────────────────────────────────
+metashape:
+  # Base name for the .psx project file and exported .obj
+  project_name: reconstruction
+
+  # Photo matching accuracy.
+  # Options: HighestAccuracy | HighAccuracy | MediumAccuracy | LowAccuracy | LowestAccuracy
+  # Higher accuracy = longer processing time and more RAM/VRAM usage.
+  match_accuracy: HighAccuracy
+
+  # Depth map quality (downscale factor applied to input images).
+  # 1 = Highest (full res)  2 = High  4 = Medium  8 = Low
+  depth_map_downscale: 2
+
+  # Texture atlas size in pixels. Power-of-2 values are recommended.
+  # 4096 works well for most objects; use 8192 for large/detailed subjects.
+  texture_size: 4096
+
+  # Number of texture atlases to generate. Increase for complex models
+  # where a single atlas would be too low-resolution.
+  texture_count: 1
+
+
+# ── Stage 4: Texture Enhancement (Stable Diffusion img2img) ───────────────────
+stable_diffusion:
+  # HuggingFace model ID. Must be downloaded/cached before offline use.
+  # See README — "Pre-cache the SD model" section.
+  model_id: stabilityai/stable-diffusion-2-1
+
+  # Local HuggingFace cache directory (~ expands on both macOS and Windows).
+  cache_dir: ~/.cache/huggingface
+
+  # Set to true to prevent any network calls (requires pre-downloaded model).
+  # Useful for air-gapped machines or enforcing reproducibility.
+  local_files_only: false
+
+  # img2img denoising strength.
+  # 0.0 = no change  |  1.0 = full regeneration
+  # Keep in the 0.25–0.35 range to enhance detail without introducing artifacts.
+  denoising_strength: 0.30
+
+  # Number of diffusion steps. More steps = higher quality but slower.
+  num_inference_steps: 30
+
+  # Classifier-free guidance scale. Higher = more prompt adherence.
+  guidance_scale: 7.5
+
+  # Working resolution for SD processing.
+  # SD 2.1 is trained at 768×768 — keep this at 768 unless you know why to change it.
+  # The texture is downscaled to this resolution for inference, then upscaled back.
+  # Must be a multiple of 8.
+  processing_resolution: 768
+
+  # Prompt that steers the enhancement direction.
+  prompt: >
+    photorealistic texture map, sharp surface detail, consistent lighting,
+    clean geometry, no seams, no artifacts, high fidelity
+
+  # Things to suppress. Keep this tuned to your typical artifact types.
+  negative_prompt: >
+    blurry, noisy, artifacts, watermark, seams, distorted,
+    overexposed, underexposed, color banding

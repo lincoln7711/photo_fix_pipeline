@@ -60,7 +60,7 @@ metashape:
 stable_diffusion:
   # HuggingFace model ID. Must be downloaded/cached before offline use.
   # See README — "Pre-cache the SD model" section.
-  model_id: stabilityai/stable-diffusion-2-1
+  model_id: stabilityai/stable-diffusion-3.5-medium
 
   # Local HuggingFace cache directory (~ expands on both macOS and Windows).
   cache_dir: ~/.cache/huggingface
@@ -75,16 +75,17 @@ stable_diffusion:
   denoising_strength: 0.30
 
   # Number of diffusion steps. More steps = higher quality but slower.
-  num_inference_steps: 30
+  num_inference_steps: 40
 
   # Classifier-free guidance scale. Higher = more prompt adherence.
-  guidance_scale: 7.5
+  # SD 3.5 Medium recommended value is 4.5.
+  guidance_scale: 4.5
 
   # Working resolution for SD processing.
-  # SD 2.1 is trained at 768×768 — keep this at 768 unless you know why to change it.
+  # SD 3.5 Medium is trained at 1024×1024 — keep this at 1024.
   # The texture is downscaled to this resolution for inference, then upscaled back.
   # Must be a multiple of 8.
-  processing_resolution: 768
+  processing_resolution: 1024
 
   # Prompt that steers the enhancement direction.
   prompt: >

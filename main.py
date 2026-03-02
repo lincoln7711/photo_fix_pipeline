@@ -231,16 +231,18 @@ def stage_metashape(
     out.mkdir(parents=True, exist_ok=True)
     ms_cfg = cfg["metashape"]
 
-    accuracy_map: dict[str, object] = {
-        "HighestAccuracy": Metashape.HighestAccuracy,
-        "HighAccuracy":    Metashape.HighAccuracy,
-        "MediumAccuracy":  Metashape.MediumAccuracy,
-        "LowAccuracy":     Metashape.LowAccuracy,
-        "LowestAccuracy":  Metashape.LowestAccuracy,
+    # Metashape 2.x uses a downscale integer for matchPhotos instead of accuracy enums.
+    # 0=Highest, 1=High, 2=Medium, 4=Low, 8=Lowest
+    downscale_map: dict[str, int] = {
+        "HighestAccuracy": 0,
+        "HighAccuracy":    1,
+        "MediumAccuracy":  2,
+        "LowAccuracy":     4,
+        "LowestAccuracy":  8,
     }
-    accuracy = accuracy_map.get(
+    match_downscale = downscale_map.get(
         ms_cfg.get("match_accuracy", "HighAccuracy"),
-        Metashape.HighAccuracy,
+        1,
     )
 
     doc          = Metashape.Document()
@@ -251,15 +253,16 @@ def stage_metashape(
     chunk.addPhotos([str(p) for p in images])
     log.info("  Added %d photos to chunk.", len(images))
 
-    log.info("  matchPhotos(accuracy=%s)…", ms_cfg.get("match_accuracy", "HighAccuracy"))
+    log.info("  matchPhotos(downscale=%s)…", match_downscale)
     chunk.matchPhotos(
-        accuracy=accuracy,
+        downscale=match_downscale,
         generic_preselection=True,
         reference_preselection=False,
     )
 
     log.info("  alignCameras…")
     chunk.alignCameras()
+    doc.save()
 
     downscale = ms_cfg.get("depth_map_downscale", 2)
     log.info("  buildDepthMaps(downscale=%s)…", downscale)
@@ -267,15 +270,16 @@ def stage_metashape(
         downscale=downscale,
         filter_mode=Metashape.MildFiltering,
     )
+    doc.save()
 
     log.info("  buildModel…")
     chunk.buildModel(source_data=Metashape.DepthMapsData)
+    doc.save()
 
     tex_size = ms_cfg.get("texture_size", 4096)
     log.info("  buildTexture(size=%s)…", tex_size)
     chunk.buildTexture(
         texture_size=tex_size,
-        count=ms_cfg.get("texture_count", 1),
     )
 
     doc.save()
@@ -330,7 +334,7 @@ def stage_enhance(
         return out
 
     import torch  # noqa: PLC0415
-    from diffusers import StableDiffusionImg2ImgPipeline  # noqa: PLC0415
+    from diffusers import StableDiffusion3Img2ImgPipeline  # noqa: PLC0415
     from PIL import Image  # noqa: PLC0415
 
     sd_cfg = cfg["stable_diffusion"]
@@ -338,7 +342,7 @@ def stage_enhance(
     # ── Device selection ────────────────────────────────────────────────────────
     if torch.cuda.is_available():
         device = "cuda"
-        dtype  = torch.float16
+        dtype  = torch.bfloat16
         log.info("  Device: CUDA — %s", torch.cuda.get_device_name(0))
     else:
         device = "cpu"
@@ -355,16 +359,16 @@ def stage_enhance(
     local_only = bool(sd_cfg.get("local_files_only", False))
 
     log.info("  Loading pipeline: %s  (local_files_only=%s)", model_id, local_only)
-    pipe = StableDiffusionImg2ImgPipeline.from_pretrained(
+    # T5-XXL text encoder (~4.7 B params) is dropped to fit within 8 GB VRAM.
+    # The two CLIP encoders are sufficient for the simple texture-enhancement prompt.
+    pipe = StableDiffusion3Img2ImgPipeline.from_pretrained(
         model_id,
+        text_encoder_3=None,
+        tokenizer_3=None,
         torch_dtype=dtype,
         cache_dir=str(cache_dir),
         local_files_only=local_only,
     ).to(device)
-
-    if device == "cuda":
-        # Reduce peak VRAM usage on 8 GB cards without meaningful quality loss
-        pipe.enable_attention_slicing()
 
     strength        = float(sd_cfg.get("denoising_strength", 0.30))
     prompt          = sd_cfg.get(
@@ -379,7 +383,7 @@ def stage_enhance(
     )
     guidance_scale  = float(sd_cfg.get("guidance_scale", 7.5))
     steps           = int(sd_cfg.get("num_inference_steps", 30))
-    proc_res        = int(sd_cfg.get("processing_resolution", 768))  # SD 2.1 native = 768
+    proc_res        = int(sd_cfg.get("processing_resolution", 1024))  # SD 3.5 Medium native = 1024
 
     log.info(
         "  strength=%.2f  steps=%d  guidance=%.1f  proc_res=%d",

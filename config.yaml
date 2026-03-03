@@ -62,45 +62,24 @@ metashape:
   min_component_size: 2500
 
 
-# ── Stage 4: Texture Enhancement (Stable Diffusion img2img) ───────────────────
-stable_diffusion:
-  # HuggingFace model ID. Must be downloaded/cached before offline use.
-  # See README — "Pre-cache the SD model" section.
-  model_id: stabilityai/stable-diffusion-3.5-medium
+# ── Stage 4: Texture Enhancement (Real-ESRGAN) ────────────────────────────────
+realesrgan:
+  # Model weights to use.
+  # RealESRGAN_x4plus  — general-purpose, best for photographic/photogrammetry textures
+  # RealESRGAN_x4plus_anime_6B — lighter model, suited to illustrated/stylised surfaces
+  model_name: RealESRGAN_x4plus
 
-  # Local HuggingFace cache directory (~ expands on both macOS and Windows).
-  cache_dir: ~/.cache/huggingface
+  # Output scale factor relative to the input texture size.
+  # 1 = same resolution (denoise/sharpen in-place, recommended for 4096 atlases)
+  # 4 = upscale 4× (e.g. 4096 → 16384; produces larger files)
+  outscale: 1
 
-  # Set to true to prevent any network calls (requires pre-downloaded model).
-  # Useful for air-gapped machines or enforcing reproducibility.
-  local_files_only: false
+  # Tile size for processing. Large textures are split into tiles to stay within
+  # VRAM limits. 512 is safe for 8 GB cards; increase to 1024 if you have headroom.
+  tile: 512
 
-  # img2img denoising strength.
-  # 0.0 = no change  |  1.0 = full regeneration
-  # Keep low (0.08–0.15) for texture maps — higher values cause SD to reinterpret
-  # smooth surfaces as faceted/crystalline geometry.
-  denoising_strength: 0.10
+  # Overlap padding between tiles (pixels). Prevents visible seams at tile edges.
+  tile_pad: 10
 
-  # Number of diffusion steps. More steps = higher quality but slower.
-  num_inference_steps: 40
-
-  # Classifier-free guidance scale. Higher = more prompt adherence.
-  # SD 3.5 Medium recommended value is 4.5.
-  guidance_scale: 4.5
-
-  # Working resolution for SD processing.
-  # SD 3.5 Medium is trained at 1024×1024 — keep this at 1024.
-  # The texture is downscaled to this resolution for inference, then upscaled back.
-  # Must be a multiple of 8.
-  processing_resolution: 1024
-
-  # Prompt that steers the enhancement direction.
-  prompt: >
-    photorealistic texture map, smooth organic surface, consistent lighting,
-    natural material, preserve existing detail, subtle enhancement, no seams
-
-  # Things to suppress. Keep this tuned to your typical artifact types.
-  negative_prompt: >
-    blurry, noisy, artifacts, watermark, seams, distorted,
-    overexposed, underexposed, color banding,
-    faceted, angular, crystalline, hard edges, fragmented, geometric, cubist
+  # Use fp16 half-precision on CUDA. Faster and uses less VRAM; negligible quality loss.
+  half: true

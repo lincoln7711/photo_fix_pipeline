@@ -311,7 +311,20 @@ def stage_metashape(
     return out
 
 
-# ── Stage 4 — Texture Enhancement (Stable Diffusion img2img) ───────────────────
+# ── Stage 4 — Texture Enhancement (Real-ESRGAN) ────────────────────────────────
+
+# Model registry — maps config name → (arch kwargs, weights URL)
+_REALESRGAN_MODELS: dict[str, tuple[dict, str]] = {
+    "RealESRGAN_x4plus": (
+        {"num_in_ch": 3, "num_out_ch": 3, "num_feat": 64, "num_block": 23, "num_grow_ch": 32, "scale": 4},
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
+    ),
+    "RealESRGAN_x4plus_anime_6B": (
+        {"num_in_ch": 3, "num_out_ch": 3, "num_feat": 64, "num_block": 6, "num_grow_ch": 32, "scale": 4},
+        "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.2.4/RealESRGAN_x4plus_anime_6B.pth",
+    ),
+}
+
 
 def stage_enhance(
     input_dir: Path,
@@ -320,19 +333,19 @@ def stage_enhance(
     dry_run: bool,
 ) -> Path:
     out = output_root / cfg["paths"]["stage4_dir"]
+    esr_cfg = cfg["realesrgan"]
 
     if dry_run and not input_dir.exists():
         log.info("[Stage 4] Texture enhancement — input: %s → %s", input_dir, out)
         log.info("  [dry-run] Would enhance all texture PNGs exported by Stage 3")
         log.info(
-            "  [dry-run] model=%s  strength=%.2f  steps=%d",
-            cfg["stable_diffusion"]["model_id"],
-            float(cfg["stable_diffusion"].get("denoising_strength", 0.30)),
-            int(cfg["stable_diffusion"].get("num_inference_steps", 30)),
+            "  [dry-run] model=%s  outscale=%s  tile=%s",
+            esr_cfg.get("model_name", "RealESRGAN_x4plus"),
+            esr_cfg.get("outscale", 1),
+            esr_cfg.get("tile", 512),
         )
         return out
 
-    # Texture maps exported by Metashape are PNGs alongside the OBJ
     textures = collect_images(input_dir, [".png"])
 
     if not textures:
@@ -345,91 +358,67 @@ def stage_enhance(
             log.info("  [dry-run] %s", tex.name)
         return out
 
-    import torch  # noqa: PLC0415
-    from diffusers import StableDiffusion3Img2ImgPipeline  # noqa: PLC0415
-    from PIL import Image  # noqa: PLC0415
+    import cv2                                          # noqa: PLC0415
+    import numpy as np                                  # noqa: PLC0415
+    import torch                                        # noqa: PLC0415
+    from basicsr.archs.rrdbnet_arch import RRDBNet      # noqa: PLC0415
+    from realesrgan import RealESRGANer                 # noqa: PLC0415
 
-    sd_cfg = cfg["stable_diffusion"]
+    model_name = esr_cfg.get("model_name", "RealESRGAN_x4plus")
+    if model_name not in _REALESRGAN_MODELS:
+        raise ValueError(f"Unknown realesrgan model_name: {model_name!r}. "
+                         f"Choose from: {list(_REALESRGAN_MODELS)}")
 
-    # ── Device selection ────────────────────────────────────────────────────────
-    if torch.cuda.is_available():
-        device = "cuda"
-        dtype  = torch.bfloat16
-        log.info("  Device: CUDA — %s", torch.cuda.get_device_name(0))
-    else:
-        device = "cpu"
-        dtype  = torch.float32
-        log.warning(
-            "  CUDA not available — running on CPU.  "
-            "Stage 4 will be very slow; consider running on the Windows/CUDA machine."
-        )
+    arch_kwargs, weights_url = _REALESRGAN_MODELS[model_name]
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    half   = bool(esr_cfg.get("half", True)) and device == "cuda"
+
+    log.info("  Model: %s  device: %s  half: %s", model_name, device, half)
+
+    rrdb_model = RRDBNet(**arch_kwargs)
+    upsampler  = RealESRGANer(
+        scale      = arch_kwargs["scale"],
+        model_path = weights_url,
+        model      = rrdb_model,
+        tile       = int(esr_cfg.get("tile", 512)),
+        tile_pad   = int(esr_cfg.get("tile_pad", 10)),
+        pre_pad    = 0,
+        half       = half,
+        device     = device,
+    )
+
+    outscale = float(esr_cfg.get("outscale", 1))
+    log.info("  outscale=%.0f  tile=%d  tile_pad=%d",
+             outscale, int(esr_cfg.get("tile", 512)), int(esr_cfg.get("tile_pad", 10)))
 
     out.mkdir(parents=True, exist_ok=True)
-
-    model_id   = sd_cfg["model_id"]
-    cache_dir  = Path(sd_cfg.get("cache_dir", "~/.cache/huggingface")).expanduser()
-    local_only = bool(sd_cfg.get("local_files_only", False))
-
-    log.info("  Loading pipeline: %s  (local_files_only=%s)", model_id, local_only)
-    # T5-XXL text encoder (~4.7 B params) is dropped to fit within 8 GB VRAM.
-    # The two CLIP encoders are sufficient for the simple texture-enhancement prompt.
-    pipe = StableDiffusion3Img2ImgPipeline.from_pretrained(
-        model_id,
-        text_encoder_3=None,
-        tokenizer_3=None,
-        torch_dtype=dtype,
-        cache_dir=str(cache_dir),
-        local_files_only=local_only,
-    ).to(device)
-
-    strength        = float(sd_cfg.get("denoising_strength", 0.30))
-    prompt          = sd_cfg.get(
-        "prompt",
-        "photorealistic texture map, sharp surface detail, consistent lighting, "
-        "clean geometry, no seams, no artifacts, high fidelity",
-    )
-    negative_prompt = sd_cfg.get(
-        "negative_prompt",
-        "blurry, noisy, artifacts, watermark, seams, distorted, overexposed, "
-        "underexposed, color banding",
-    )
-    guidance_scale  = float(sd_cfg.get("guidance_scale", 7.5))
-    steps           = int(sd_cfg.get("num_inference_steps", 30))
-    proc_res        = int(sd_cfg.get("processing_resolution", 1024))  # SD 3.5 Medium native = 1024
-
-    log.info(
-        "  strength=%.2f  steps=%d  guidance=%.1f  proc_res=%d",
-        strength, steps, guidance_scale, proc_res,
-    )
 
     for idx, tex_path in enumerate(textures, 1):
         out_path = out / tex_path.name
         log.info("  [%d/%d] %s", idx, len(textures), tex_path.name)
 
-        original = Image.open(tex_path).convert("RGB")
-        orig_w, orig_h = original.size
+        img = cv2.imread(str(tex_path), cv2.IMREAD_UNCHANGED)
+        if img is None:
+            log.warning("  Cannot read %s — skipping.", tex_path.name)
+            continue
 
-        # Scale to processing resolution; dimensions must be multiples of 8
-        scale  = min(proc_res / orig_w, proc_res / orig_h)
-        proc_w = (int(orig_w * scale) // 8) * 8
-        proc_h = (int(orig_h * scale) // 8) * 8
-        working = original.resize((proc_w, proc_h), Image.LANCZOS)
+        # Separate alpha if present; Real-ESRGAN operates on BGR only
+        has_alpha = img.ndim == 3 and img.shape[2] == 4
+        if has_alpha:
+            alpha = img[:, :, 3]
+            img   = img[:, :, :3]
 
-        result = pipe(
-            prompt=prompt,
-            negative_prompt=negative_prompt,
-            image=working,
-            strength=strength,
-            guidance_scale=guidance_scale,
-            num_inference_steps=steps,
-        ).images[0]
+        enhanced, _ = upsampler.enhance(img, outscale=outscale)
 
-        # Restore original resolution so downstream tooling sees the expected dimensions
-        if result.size != (orig_w, orig_h):
-            result = result.resize((orig_w, orig_h), Image.LANCZOS)
+        if has_alpha:
+            # Resize alpha to match enhanced dimensions and reattach
+            ah, aw = enhanced.shape[:2]
+            alpha_resized = cv2.resize(alpha, (aw, ah), interpolation=cv2.INTER_LINEAR)
+            enhanced = np.dstack([enhanced, alpha_resized])
 
-        result.save(str(out_path), format="PNG")
-        log.info("    saved %s  (%d×%d)", out_path.name, orig_w, orig_h)
+        cv2.imwrite(str(out_path), enhanced)
+        h, w = enhanced.shape[:2]
+        log.info("    saved %s  (%d×%d)", out_path.name, w, h)
 
     log.info("[Stage 4] Done — output: %s", out)
     return out

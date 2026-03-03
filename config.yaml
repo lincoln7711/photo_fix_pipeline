@@ -55,6 +55,12 @@ metashape:
   # where a single atlas would be too low-resolution.
   texture_count: 1
 
+  # Mesh cleanup: remove disconnected components with fewer than this many
+  # polygons. Eliminates floating artifacts from photogrammetry noise.
+  # Set to 0 to disable. The main subject typically has tens of thousands
+  # of polygons; floaters are usually in the tens-to-hundreds range.
+  min_component_size: 2500
+
 
 # ── Stage 4: Texture Enhancement (Stable Diffusion img2img) ───────────────────
 stable_diffusion:
@@ -71,8 +77,9 @@ stable_diffusion:
 
   # img2img denoising strength.
   # 0.0 = no change  |  1.0 = full regeneration
-  # Keep in the 0.25–0.35 range to enhance detail without introducing artifacts.
-  denoising_strength: 0.30
+  # Keep low (0.08–0.15) for texture maps — higher values cause SD to reinterpret
+  # smooth surfaces as faceted/crystalline geometry.
+  denoising_strength: 0.10
 
   # Number of diffusion steps. More steps = higher quality but slower.
   num_inference_steps: 40
@@ -89,10 +96,11 @@ stable_diffusion:
 
   # Prompt that steers the enhancement direction.
   prompt: >
-    photorealistic texture map, sharp surface detail, consistent lighting,
-    clean geometry, no seams, no artifacts, high fidelity
+    photorealistic texture map, smooth organic surface, consistent lighting,
+    natural material, preserve existing detail, subtle enhancement, no seams
 
   # Things to suppress. Keep this tuned to your typical artifact types.
   negative_prompt: >
     blurry, noisy, artifacts, watermark, seams, distorted,
-    overexposed, underexposed, color banding
+    overexposed, underexposed, color banding,
+    faceted, angular, crystalline, hard edges, fragmented, geometric, cubist

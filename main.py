@@ -276,6 +276,18 @@ def stage_metashape(
     chunk.buildModel(source_data=Metashape.DepthMapsData)
     doc.save()
 
+    min_component = int(ms_cfg.get("min_component_size", 1000))
+    if min_component > 0:
+        before = len(chunk.model.faces)
+        chunk.model.removeComponents(min_component)
+        after = len(chunk.model.faces)
+        removed = before - after
+        log.info(
+            "  removeComponents(threshold=%d) — %d → %d faces (%d removed)",
+            min_component, before, after, removed,
+        )
+        doc.save()
+
     tex_size = ms_cfg.get("texture_size", 4096)
     log.info("  buildTexture(size=%s)…", tex_size)
     chunk.buildTexture(

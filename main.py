@@ -5,7 +5,7 @@ Photogrammetry Post-Processing Pipeline
 Stage 1  Background removal     (rembg / u2net)
 Stage 2  Exposure normalization  (Pillow + OpenCV)
 Stage 3  3-D reconstruction      (Agisoft Metashape Python API)
-Stage 4  Texture enhancement     (Stable Diffusion img2img)
+Stage 4  Texture enhancement     (Real-ESRGAN)
 
 Usage:
     python main.py --input ./photos
@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import shutil
 import sys
 import time
 from pathlib import Path
@@ -393,6 +394,14 @@ def stage_enhance(
 
     out.mkdir(parents=True, exist_ok=True)
 
+    # Copy OBJ + MTL from Stage 3 so Stage 4 folder is a self-contained package
+    for companion in input_dir.glob("*.obj"):
+        shutil.copy2(companion, out / companion.name)
+        log.info("  Copied %s", companion.name)
+    for companion in input_dir.glob("*.mtl"):
+        shutil.copy2(companion, out / companion.name)
+        log.info("  Copied %s", companion.name)
+
     for idx, tex_path in enumerate(textures, 1):
         out_path = out / tex_path.name
         log.info("  [%d/%d] %s", idx, len(textures), tex_path.name)
@@ -435,7 +444,7 @@ stages:
   1  Background removal    (rembg)
   2  Exposure normalization (Pillow + OpenCV)
   3  3-D reconstruction    (Agisoft Metashape)
-  4  Texture enhancement   (Stable Diffusion)
+  4  Texture enhancement   (Real-ESRGAN)
 
 examples:
   python main.py --input ./photos
